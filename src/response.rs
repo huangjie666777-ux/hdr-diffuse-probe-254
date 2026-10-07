@@ -65,13 +65,17 @@ pub fn solve_channel(
         let mut values = Vec::with_capacity(n_exp);
         let mut all_zero = true;
         let mut all_max = true;
+        let mut has_zero = false;
+        let mut has_max = false;
         for frame in frames {
             let z = frame.image.pixel(x, y)[channel_index];
             values.push(z);
             if z != 0 { all_zero = false; }
             if z != 255 { all_max = false; }
+            if z == 0 { has_zero = true; }
+            if z == 255 { has_max = true; }
         }
-        if all_zero || all_max { continue; }
+        if all_zero || all_max || (has_zero && has_max) { continue; }
         samples.push(SamplePoint { x, y });
         sample_values.push(values);
         if samples.len() >= max_points { break 'outer; }

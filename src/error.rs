@@ -36,6 +36,11 @@ pub enum HdrError {
         x: usize,
         y: usize,
     },
+    Pfm {
+        path: PathBuf,
+        message: String,
+    },
+    Probe(String),
 }
 
 impl std::fmt::Display for HdrError {
@@ -75,6 +80,10 @@ impl std::fmt::Display for HdrError {
                 f,
                 "no usable exposure at ({x},{y}) channel {channel}"
             ),
+            HdrError::Pfm { path, message } => {
+                write!(f, "invalid PFM {}: {}", path.display(), message)
+            }
+            HdrError::Probe(message) => write!(f, "light probe error: {message}"),
         }
     }
 }
