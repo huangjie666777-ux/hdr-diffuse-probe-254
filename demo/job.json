@@ -1,0 +1,13 @@
+{
+  "frames": [
+    { "path": "demo_exposure_0.png", "exposure_seconds": 0.00390625 },
+    { "path": "demo_exposure_1.png", "exposure_seconds": 0.015625 },
+    { "path": "demo_exposure_2.png", "exposure_seconds": 0.0625 },
+    { "path": "demo_exposure_3.png", "exposure_seconds": 0.25 },
+    { "path": "demo_exposure_4.png", "exposure_seconds": 1 },
+    { "path": "demo_exposure_5.png", "exposure_seconds": 4 }
+  ],
+  "output_pfm": "demo_output.pfm",
+  "mask_png": "demo_mask.png",
+  "report_json": "demo_report.json"
+}
