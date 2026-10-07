@@ -3,6 +3,8 @@
 Debevec-style HDR reconstruction engine written from scratch in Rust (1.85.1),
 using `nalgebra` 0.33.2 for the least-squares/SVD solve and `png` 0.17.16 for image I/O.
 No HTTP, no frontend, no registration / de-ghosting / color management.
+It also bakes 2:1 equirectangular HDR panoramas into order-2 spherical-harmonic
+light probes and evaluates them for diffuse (Lambertian) shading.
 
 ## Input
 
@@ -73,6 +75,45 @@ the 8-bit input unchanged. Ratios of reconstructed radiance values are
 meaningful (and exposure-independent); absolute photometric units (cd/m^2)
 are not recoverable without calibration.
 
+## Light probes
+
+`bake` reads the reconstruction's RGB32F PFM panorama plus its RGB validity
+mask PNG and projects the radiance onto the 9 orthonormalized real spherical
+harmonics of bands l = 0..=2, per channel (27 coefficients total).
+
+- The panorama must be 2:1 equirectangular with each side at most 512 px.
+  PFM rows are stored bottom-up and are restored to top-to-bottom order;
+  the top row is the +y pole. Inputs are never modified.
+- A pixel is used only when every mask channel is 255 **and** all three
+  radiance channels are finite and non-negative; any invalid channel rejects
+  the whole pixel. Rejected pixels are skipped in the integral, never
+  filled with black.
+- Directions are taken at pixel centers: latitude from +y (up) downward,
+  longitude increasing from +x toward +z (right-handed). Each pixel is
+  weighted by the exact solid angle of its lat/long cell boundaries
+  (`d_lon * (sin lat_top - sin lat_bot)`); no equal-weight or
+  luminance-based normalization is applied.
+- An optional environment yaw (degrees, right-hand rule about +y) rotates
+  the sampling directions before projection.
+
+The probe is saved as reloadable JSON containing the 27 radiance
+coefficients, the basis order and constants, the coordinate convention, the
+Lambertian convolution weights, and the source panorama (path, size,
+valid/skipped pixel counts, yaw).
+
+`query` (or the library API `LightProbe::evaluate`) accepts a batch of
+finite, non-zero world-space normals and RGB albedos in [0, 1]. Normals are
+normalized; the coefficients are convolved per band with pi, 2pi/3 and
+pi/4. Irradiance is clamped to zero only after evaluation, and outgoing
+radiance is `albedo * irradiance / pi`; values above 1 are preserved.
+
+Because the input radiance is on a relative scale (see above), probe
+coefficients and queried radiances share that same relative scale. The
+order-2 SH projection is a **low-frequency approximation**: it reproduces
+the constant term exactly (up to lat/long quadrature error, ~5e-4 at
+64x32) but blurs high-frequency lighting detail such as small bright
+sources, which is the intended trade-off for diffuse irradiance.
+
 ## Usage
 
 ```sh
@@ -87,13 +128,25 @@ cargo build --release
 
 # write the synthetic exposures + job into ./demo and reconstruct them
 ./target/release/hdr_probe254 demo [outdir]
+
+# bake a light probe from a reconstructed 2:1 panorama and its mask
+./target/release/hdr_probe254 bake panorama.pfm mask.png probe.json [yaw_deg]
+
+# evaluate diffuse outgoing radiance for a normal and albedo
+./target/release/hdr_probe254 query probe.json 0,1,0 0.8,0.8,0.8
 ```
 
-The demo scene spans a wide log-radiance range and includes a region so
+The demo scene is a 160x80 (2:1) synthetic panorama spanning a wide
+log-radiance range and includes a region so
 bright it saturates even the longest exposure; those sun channels are
 reported invalid in the mask (0) rather than guessed. On the reference
 machine the self-test reconstructs non-saturated channels with a log-radiance
 RMSE around 0.01 and `|g[128]|` around 5e-12.
+The demo continues through the full example: it bakes `demo_probe.json`
+from the reconstructed panorama and mask, reloads it, and prints diffuse
+queries for a few normals. The self-test additionally checks that a
+constant environment reproduces the analytic irradiance `pi * L` for
+arbitrary yaw and that negative evaluated irradiance clamps to zero.
 
 ## Source layout
 
@@ -101,8 +154,10 @@ RMSE around 0.01 and `|g[128]|` around 5e-12.
 - `src/job.rs` - job JSON parsing and input validation
 - `src/response.rs` - sampling and Debevec joint solve with SVD rank check
 - `src/fusion.rs` - weighted log-domain radiance fusion and validity mask
-- `src/pfm.rs` - RGB32F PFM writer
+- `src/pfm.rs` - RGB32F PFM writer and reader
+- `src/probe.rs` - real SH bases, probe JSON, batch diffuse evaluation
+- `src/bake.rs` - panorama validation and SH projection with solid-angle weights
 - `src/report.rs`, `src/deliver.rs` - JSON report, atomic staging
 - `src/pipeline.rs` - end-to-end orchestration
 - `src/demo.rs` - synthetic nonlinear-response example and self-test
-- `src/main.rs` - CLI (`run`, `selftest`, `demo`)
+- `src/main.rs` - CLI (`run`, `selftest`, `demo`, `bake`, `query`)

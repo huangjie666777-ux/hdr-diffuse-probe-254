@@ -10,9 +10,21 @@ use crate::response::recover_responses;
 pub const MAX_SAMPLE_POINTS: usize = 128;
 
 pub fn run(job: &Job) -> HdrResult<()> {
-    for out in [&job.output_pfm, &job.mask_png, &job.report_json] {
-        let _ = std::fs::remove_file(out);
+    let result = run_staged(job);
+    if result.is_err() {
+        // A failed run must not leave partial deliveries behind.
+        for tmp in [
+            job.output_pfm.with_extension("pfm.hdrf.tmp"),
+            job.mask_png.with_extension("png.hdrf.tmp"),
+            job.report_json.with_extension("json.hdrf.tmp"),
+        ] {
+            let _ = std::fs::remove_file(tmp);
+        }
     }
+    result
+}
+
+fn run_staged(job: &Job) -> HdrResult<()> {
     let frames: &[Frame] = &job.frames;
     let responses = recover_responses(frames, job.width, job.height, MAX_SAMPLE_POINTS)?;
     let fused = fuse(frames, &responses)?;

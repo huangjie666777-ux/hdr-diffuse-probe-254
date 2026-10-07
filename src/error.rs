@@ -18,6 +18,11 @@ pub enum HdrError {
         path: PathBuf,
         message: String,
     },
+    Pfm {
+        path: PathBuf,
+        message: String,
+    },
+    Probe(String),
     Rank {
         channel: char,
         rank: usize,
@@ -52,6 +57,10 @@ impl std::fmt::Display for HdrError {
             HdrError::Json { path, message } => {
                 write!(f, "invalid JSON {}: {}", path.display(), message)
             }
+            HdrError::Pfm { path, message } => {
+                write!(f, "invalid PFM {}: {}", path.display(), message)
+            }
+            HdrError::Probe(message) => write!(f, "light probe error: {message}"),
             HdrError::Rank {
                 channel,
                 rank,

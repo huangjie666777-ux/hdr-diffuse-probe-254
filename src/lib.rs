@@ -6,5 +6,7 @@ pub mod image;
 pub mod job;
 pub mod pfm;
 pub mod pipeline;
+pub mod bake;
+pub mod probe;
 pub mod report;
 pub mod response;

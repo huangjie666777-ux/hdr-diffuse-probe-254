@@ -71,7 +71,10 @@ pub fn solve_channel(
             if z != 0 { all_zero = false; }
             if z != 255 { all_max = false; }
         }
-        if all_zero || all_max { continue; }
+        // Reject points with no usable exposure at all, including points
+        // that mix 0 and 255 across the bracket: every weight is zero
+        // there, so their log-radiance unknown would be unconstrained.
+        if all_zero || all_max || values.iter().all(|&z| weight(z) == 0.0) { continue; }
         samples.push(SamplePoint { x, y });
         sample_values.push(values);
         if samples.len() >= max_points { break 'outer; }

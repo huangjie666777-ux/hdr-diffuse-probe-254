@@ -2,9 +2,11 @@ use crate::error::{HdrError, HdrResult};
 use crate::image::{encode_rgb8_png, Frame, Image8};
 use crate::fusion::fuse;
 use crate::response::recover_responses;
+use crate::bake::project_sh;
+use crate::probe::{LightProbe, SH_BASES};
 
 pub const DEMO_WIDTH: usize = 160;
-pub const DEMO_HEIGHT: usize = 120;
+pub const DEMO_HEIGHT: usize = 80; // 2:1 equirectangular panorama
 
 pub struct SyntheticData {
     pub frames: Vec<Frame>,
@@ -119,6 +121,90 @@ pub fn run_selftest() -> HdrResult<SelfTestReport> {
         compared_pixels: count,
         invalid_sun_pixels: invalid_sun,
         g_anchor_residual: anchor,
+    })
+}
+
+pub struct ProbeSelfTestReport {
+    pub irradiance_max_rel_err: f64,
+    pub clamp_checked: bool,
+    pub yaw_checked: bool,
+}
+
+// In-memory probe checks: a constant panorama must reproduce the analytic
+// Lambertian irradiance pi * L for every normal, independent of yaw, and
+// negative evaluated irradiance must clamp to zero.
+pub fn run_probe_selftest() -> HdrResult<ProbeSelfTestReport> {
+    let width = 64usize;
+    let height = 32usize;
+    let level = [0.5f32, 1.0, 2.0];
+    let mut radiance = vec![0.0f32; width * height * 3];
+    for px in radiance.chunks_exact_mut(3) {
+        px.copy_from_slice(&level);
+    }
+    let valid = vec![true; width * height];
+    let mut max_rel: f64 = 0.0;
+    for &yaw in &[0.0f64, 37.5, -123.0] {
+        let (coeffs, used) = project_sh(width, height, &radiance, &valid, yaw)?;
+        if used != width * height {
+            return Err(HdrError::Probe("selftest: pixels dropped".to_string()));
+        }
+        let probe = LightProbe {
+            coefficients: coeffs,
+            yaw_degrees: yaw,
+            source_pfm: "selftest".to_string(),
+            source_mask: "selftest".to_string(),
+            width,
+            height,
+            valid_pixels: used,
+            skipped_pixels: 0,
+        };
+        let normals: Vec<[f64; 3]> = vec![
+            [0.0, 1.0, 0.0],
+            [0.0, -1.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.3, -0.5, 0.8],
+        ];
+        let albedos = vec![[1.0f64, 1.0, 1.0]; normals.len()];
+        let out = probe.evaluate(&normals, &albedos)?;
+        for rgb in out {
+            for c in 0..3 {
+                let expect = level[c] as f64;
+                let rel = ((rgb[c] - expect) / expect).abs();
+                max_rel = max_rel.max(rel);
+            }
+        }
+    }
+    // Center-sampled lat/long quadrature is exact for the constant term but
+    // only approximate for degree-2, so allow a small discretization error.
+    if max_rel > 2.0e-3 {
+        return Err(HdrError::Probe(format!(
+            "selftest: constant-environment irradiance off by {max_rel:.3e}"
+        )));
+    }
+    // Clamp check: l=1-only probe goes negative on the opposite hemisphere.
+    let mut neg_coeffs = [[0.0f64; SH_BASES]; 3];
+    neg_coeffs[0][2] = 1.0; // Y10 ~ +y
+    let probe = LightProbe {
+        coefficients: neg_coeffs,
+        yaw_degrees: 0.0,
+        source_pfm: "selftest".to_string(),
+        source_mask: "selftest".to_string(),
+        width,
+        height,
+        valid_pixels: 0,
+        skipped_pixels: 0,
+    };
+    let out = probe.evaluate(&[[0.0, -1.0, 0.0]], &[[0.8, 0.8, 0.8]])?;
+    let clamp_ok = out[0][0] == 0.0;
+    if !clamp_ok {
+        return Err(HdrError::Probe(
+            "selftest: negative irradiance was not clamped".to_string(),
+        ));
+    }
+    Ok(ProbeSelfTestReport {
+        irradiance_max_rel_err: max_rel,
+        clamp_checked: clamp_ok,
+        yaw_checked: true,
     })
 }
 

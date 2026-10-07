@@ -106,12 +106,36 @@ pub fn load_job(job_path: &Path) -> HdrResult<Job> {
     let or_default = |opt: &Option<PathBuf>, name: &str| -> PathBuf {
         opt.as_ref().map(|p| resolve(p)).unwrap_or_else(|| base_dir.join(name))
     };
-    Ok(Job {
+    let job = Job {
         frames,
         width: width.unwrap(),
         height: height.unwrap(),
         output_pfm: or_default(&parsed.output_pfm, "hdr_fusion_output.pfm"),
         mask_png: or_default(&parsed.mask_png, "hdr_fusion_mask.png"),
         report_json: or_default(&parsed.report_json, "hdr_fusion_report.json"),
-    })
+    };
+    // Never let an output path overwrite one of the input frames.
+    let abs = |p: &Path| -> PathBuf {
+        if let Ok(c) = std::fs::canonicalize(p) {
+            return c;
+        }
+        match (p.parent(), p.file_name()) {
+            (Some(parent), Some(name)) => std::fs::canonicalize(parent)
+                .map(|c| c.join(name))
+                .unwrap_or_else(|_| p.to_path_buf()),
+            _ => p.to_path_buf(),
+        }
+    };
+    for out in [&job.output_pfm, &job.mask_png, &job.report_json] {
+        for frame in &job.frames {
+            if abs(out) == abs(&frame.path) {
+                return Err(HdrError::Job(format!(
+                    "output {} would overwrite input frame {}",
+                    out.display(),
+                    frame.path.display()
+                )));
+            }
+        }
+    }
+    Ok(job)
 }
